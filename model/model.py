@@ -20,39 +20,69 @@ class HeteroHyperModel(nn.Module):
             hidden: int = 64,
             heads: int = 4,
             dropout: float = 0.1,
+            num_rounds: int = 3,  # ← how many mp rounds
     ):
         super().__init__()
-        self.drug_hyper = DrugHyperConv(drug_in, drug_edge, hidden, hidden, dropout)
-        self.protein_hyper = ProteinHyperConv(protein_in, hidden, hidden, dropout)
+        self.num_rounds = num_rounds
+        self.drug_hyper = nn.ModuleList([
+            DrugHyperConv(drug_in,
+                          drug_edge,
+                          hidden,
+                          hidden,
+                          dropout)
+            for i in range(num_rounds)
+        ])
+        self.protein_hyper = nn.ModuleList([
+            ProteinHyperConv(protein_in,
+                             hidden,
+                             hidden,
+                             dropout)
+            for i in range(num_rounds)
+        ])
+
+        self.drug_back_projection = nn.ModuleList([
+            nn.Linear(hidden, drug_in, bias=False)
+            for i in range(num_rounds)
+        ])
+        self.protein_back_projection = nn.ModuleList([
+            nn.Linear(hidden, protein_in, bias=False)
+            for i in range(num_rounds)
+        ])
+
+        # cross‐type attention (shared across rounds)
         self.drug_protein_att = DrugProteinAttention(
             in_drug=hidden,
             in_protein=hidden,
             out_dim=hidden,
-            num_heads=heads,
-            dropout=dropout,
         )
+
         self.link_pred = LinkPredictor(
-            in_drug=hidden,
-            in_protein=hidden,
+            in_drug=drug_in,
+            in_protein=protein_in,
             hidden_dim=hidden)
 
     def forward(self, data: HeteroData) -> torch.Tensor:
-        # Drug hypergraph
-        drug_atom_x = data['drug_atom'].x
-        drug_edge_x = data['drugs_hyperedge'].x
-        drug_inc = data['drug_atom', 'to', 'drug_hyperedge'].edge_index
-        drug_emb = self.drug_hyper(drug_atom_x, drug_edge_x, drug_inc)
+        # unpack features & topology
+        x_drug = data['drug_atom'].x
+        edge_drug = data['drugs_hyperedge'].x
+        inc_drug = data['drug_atom', 'to', 'drug_hyperedge'].edge_index
 
-        # Protein hypergraph
-        protein_amino_x = data['proteins'].x
+        x_prot = data['proteins'].x
         prot_inc = data['protein_amino', 'to'].edge_index
-        protein_emb = self.protein_hyper(protein_amino_x, prot_inc)
 
-        # Cross-type attention
-        dp_edge_index = data['drug', 'to', 'protein'].edge_index
-        # Update protein embeddings by attending over drugs
-        drug_emb, protein_emb = self.drug_protein_att(drug_emb, protein_emb, dp_edge_index)
+        dp_edge_idx = data['drug', 'to', 'protein'].edge_index
 
-        # Link prediction logits for each edge
-        logits = self.link_pred(drug_emb, drug_emb, dp_edge_index)
+        # multi‐round message passing
+        for i in range(self.num_rounds):
+            x_drug = self.drug_hyper[i](x_drug, edge_drug, inc_drug)
+            x_prot = self.protein_hyper[i](x_prot,  prot_inc)
+
+            # cross‐type attention updates protein (and optionally drugs)
+            # returns updated (drug, protein)
+            x_drug, x_prot = self.drug_protein_att(x_drug, x_prot, dp_edge_idx)
+            x_drug = self.drug_back_projection[i](x_drug)
+            x_prot = self.protein_back_projection[i](x_prot)
+
+        # final link‐prediction on drug→protein edges
+        logits = self.link_pred(x_drug, x_prot, dp_edge_idx)
         return logits

@@ -12,7 +12,6 @@ class DrugProteinAttention(nn.Module):
         in_protein: int,
         out_dim: int,
         num_heads: int = 4,
-        dropout: float = 0.0,
     ):
         super().__init__()
         # Projektionen in denselben Embed­dingspace
