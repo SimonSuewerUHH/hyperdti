@@ -4,18 +4,34 @@ from torch.optim.lr_scheduler import StepLR
 from torch_geometric.data import HeteroData
 from tqdm import tqdm
 
-from data.splitter import split_masks
-from helper.evaluate import evaluate, test
+from helper.evaluate import evaluate
+from helper.negative_sampling import hetero_negative_sampling
 from helper.parser import Config
 from model.model import HeteroHyperModel
 
 
-def train_epoch(model, data: HeteroData, optimizer, criterion) -> float:
+def train_epoch(model, data: HeteroData, optimizer, criterion, neg_ratio: float = 0.1) -> float:
     model.train()
     optimizer.zero_grad()
-    logits = model(data)
-    edge_index = torch.ones(logits.shape[0])
-    loss = criterion(logits,edge_index)
+
+    # 1) Positive Kanten
+    pos_edge_index = data['drug', 'to', 'protein'].edge_index
+    num_pos = pos_edge_index.size(1)
+
+    # 2) Negative Sampling: gleiche Anzahl wie Positiv
+    neg_edge_index = hetero_negative_sampling(
+        pos_edge_index=pos_edge_index,
+        num_neg=int(num_pos * neg_ratio))
+
+    # 3) Labels erstellen
+    y_pos = torch.ones(num_pos, device=pos_edge_index.device)
+    y_neg = torch.zeros(neg_edge_index.size(1), device=pos_edge_index.device)
+    labels = torch.cat([y_pos, y_neg], dim=0)
+
+    # 4) Modell-Vorwärtslauf mit beiden Kanten
+    logits = model(data, pos_edge_index=pos_edge_index, neg_edge_index=neg_edge_index)
+
+    loss = criterion(logits.view(-1), labels)
     loss.backward()
     optimizer.step()
     return loss.item()

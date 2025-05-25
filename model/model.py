@@ -1,6 +1,9 @@
+from typing import Optional
+
 import torch
-from torch import nn
+from torch import nn, Tensor
 from torch_geometric.data import HeteroData
+from tqdm import tqdm
 
 from model.attention import DrugProteinAttention
 from model.conv import DrugHyperConv, ProteinHyperConv
@@ -61,7 +64,9 @@ class HeteroHyperModel(nn.Module):
             in_protein=protein_in,
             hidden_dim=hidden)
 
-    def forward(self, data: HeteroData) -> torch.Tensor:
+    def forward(self, data: HeteroData,
+                      pos_edge_index: Tensor,
+                      neg_edge_index: Optional[Tensor] = None) -> Tensor:
         # unpack features & topology
         x_drug = data['drug_atom'].x
         edge_drug = data['drugs_hyperedge'].x
@@ -70,19 +75,22 @@ class HeteroHyperModel(nn.Module):
         x_prot = data['proteins'].x
         prot_inc = data['protein_amino', 'to'].edge_index
 
-        dp_edge_idx = data['drug', 'to', 'protein'].edge_index
+        if neg_edge_index is not None:
+            edge_index_all = torch.cat([pos_edge_index, neg_edge_index], dim=1)
+        else:
+            edge_index_all = pos_edge_index
 
         # multi‐round message passing
-        for i in range(self.num_rounds):
+        for i in tqdm(range(self.num_rounds), desc='Rounds'):
             x_drug = self.drug_hyper[i](x_drug, edge_drug, inc_drug)
             x_prot = self.protein_hyper[i](x_prot,  prot_inc)
 
             # cross‐type attention updates protein (and optionally drugs)
             # returns updated (drug, protein)
-            x_drug, x_prot = self.drug_protein_att(x_drug, x_prot, dp_edge_idx)
+            x_drug, x_prot = self.drug_protein_att(x_drug, x_prot, edge_index_all)
             x_drug = self.drug_back_projection[i](x_drug)
             x_prot = self.protein_back_projection[i](x_prot)
 
         # final link‐prediction on drug→protein edges
-        logits = self.link_pred(x_drug, x_prot, dp_edge_idx)
+        logits = self.link_pred(x_drug, x_prot, edge_index_all)
         return logits
