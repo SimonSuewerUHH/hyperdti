@@ -27,30 +27,19 @@ class HeteroHyperModel(nn.Module):
     ):
         super().__init__()
         self.num_rounds = num_rounds
-        self.drug_hyper = nn.ModuleList([
-            DrugHyperConv(drug_in,
-                          drug_edge,
-                          hidden,
-                          hidden,
-                          dropout)
-            for i in range(num_rounds)
-        ])
-        self.protein_hyper = nn.ModuleList([
-            ProteinHyperConv(protein_in,
-                             hidden,
-                             hidden,
-                             dropout)
-            for i in range(num_rounds)
-        ])
+        self.drug_hyper = DrugHyperConv(drug_in,
+                                        drug_edge,
+                                        hidden,
+                                        hidden,
+                                        dropout)
+        self.protein_hyper = ProteinHyperConv(protein_in,
+                                              hidden,
+                                              hidden,
+                                              dropout)
 
-        self.drug_back_projection = nn.ModuleList([
-            nn.Linear(hidden, drug_in, bias=False)
-            for i in range(num_rounds)
-        ])
-        self.protein_back_projection = nn.ModuleList([
-            nn.Linear(hidden, protein_in, bias=False)
-            for i in range(num_rounds)
-        ])
+        self.drug_back_projection = nn.Linear(hidden, drug_in, bias=False)
+
+        self.protein_back_projection = nn.Linear(hidden, protein_in, bias=False)
 
         # cross‐type attention (shared across rounds)
         self.drug_protein_att = DrugProteinAttention(
@@ -65,8 +54,9 @@ class HeteroHyperModel(nn.Module):
             hidden_dim=hidden)
 
     def forward(self, data: HeteroData,
-                      pos_edge_index: Tensor,
-                      neg_edge_index: Optional[Tensor] = None) -> Tensor:
+                pos_edge_index: Tensor,
+                neg_edge_index: Optional[Tensor] = None,
+                num_rounds: Optional[int] = None) -> Tensor:
         # unpack features & topology
         x_drug = data['drug_atom'].x
         edge_drug = data['drugs_hyperedge'].x
@@ -81,15 +71,16 @@ class HeteroHyperModel(nn.Module):
             edge_index_all = pos_edge_index
 
         # multi‐round message passing
-        for i in tqdm(range(self.num_rounds), desc='Rounds'):
-            x_drug = self.drug_hyper[i](x_drug, edge_drug, inc_drug)
-            x_prot = self.protein_hyper[i](x_prot,  prot_inc)
+        num_rounds = num_rounds if num_rounds is not None else self.num_rounds
+        for i in tqdm(range(num_rounds), desc='Rounds'):
+            x_drug = self.drug_hyper(x_drug, edge_drug, inc_drug)
+            x_prot = self.protein_hyper(x_prot, prot_inc)
 
             # cross‐type attention updates protein (and optionally drugs)
             # returns updated (drug, protein)
             x_drug, x_prot = self.drug_protein_att(x_drug, x_prot, edge_index_all)
-            x_drug = self.drug_back_projection[i](x_drug)
-            x_prot = self.protein_back_projection[i](x_prot)
+            x_drug = self.drug_back_projection(x_drug)
+            x_prot = self.protein_back_projection(x_prot)
 
         # final link‐prediction on drug→protein edges
         logits = self.link_pred(x_drug, x_prot, edge_index_all)

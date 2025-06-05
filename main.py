@@ -1,6 +1,6 @@
-import os
-import torch
 import pandas as pd
+import torch
+
 from data.graph_gen import HypergraphDataGenerator
 from helper.parser import parse_args
 from helper.train import train
@@ -11,7 +11,7 @@ def main():
     torch.manual_seed(cfg.seed)
 
     df = pd.read_csv('dataset/BindindDB/full_data.csv')
-    df_5 = df[0:30]
+    df_5 = df[0:400]
     smiles = df_5['SMILES']
     proteins = df_5['Proteins']
     sequences = df_5['sequence']
@@ -31,7 +31,7 @@ def main():
         # Generate the data
         # Note: This will take a while
         data = generator.generate()
-        #generator.save_data(data, saved_path)
+        generator.save_data(data, saved_path)
 
     train(data, cfg)
 

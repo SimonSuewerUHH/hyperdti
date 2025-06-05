@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-
+from torch.nn.utils.rnn import pad_sequence
 
 
 class CustomHyperSemanticMessagePassing(nn.Module):
@@ -26,62 +26,71 @@ class CustomHyperSemanticMessagePassing(nn.Module):
             batch_first=True
         )
 
-    def forward(self, x, edge_index, edge_attr):
+    def forward(self, x, incidence, edge_attr):
         """
-        x:          Tensor [N, in_dim] mit den Knoteneingabe-Features
-        edge_index: LongTensor [2, E], erste Zeile Quelle u, zweite Zeile Ziel v
-        edge_attr:  Tensor [E, edge_dim] mit Kantenfeatures (z.B. Gewichtungen)
+        x:         [N, in_dim]
+        incidence: [E, N]  (Hypergraph-Inzidenzmatrix)
+        edge_attr: [E, edge_dim]
         """
         N = x.size(0)
+        Wh = self.lin(x)                             # [N, D]
+        We = self.edge_lin(edge_attr) if self.has_edge_attr else None  # [E, D]
 
-        # 1) Knotentransformation
-        Wh = self.lin(x)  # [N, out_dim]
-
-        # 2) Edge-Feature-Projektion
-        if self.has_edge_attr:
-            We = self.edge_lin(edge_attr)  # [E, out_dim]
-
-        # 3) Ergebnis-Container
-        out = torch.zeros_like(Wh)
-
-        # 4) Für jeden Knoten v: finde alle Hyperedges, in denen er drin ist
+        # 1) Alle (e,u)-Paare sammeln
+        pairs = []
+        pair_owner = []  # für jedes Paar, zu welchem Zielknoten v es gehört
         for v in range(N):
-            # Liste aller Edge-IDs, bei denen incidence[e, v] == 1
-            e_ids = torch.nonzero(edge_index[:, v], as_tuple=False).flatten().tolist()
-            if not e_ids:
-                continue
-
-            # 5) Sammle (edge, node)-Paare für Attention
-            keys = []
-            values = []
-            for e_id in e_ids:
-                # alle Knoten u in Hyperedge e_id
-                u_ids = torch.nonzero(edge_index[e_id], as_tuple=False).flatten().tolist()
+            # Kanten, die v enthalten
+            e_ids = torch.nonzero(incidence[:, v], as_tuple=False).flatten()
+            for e in e_ids:
+                u_ids = torch.nonzero(incidence[e], as_tuple=False).flatten()
                 for u in u_ids:
-                    # Key = Wh[u] plus Kanten-Bias We[e_id]
-                    if self.has_edge_attr:
-                        keys.append(Wh[u] + We[e_id])
-                    else:
-                        keys.append(Wh[u])
-                    # Value = Wh[u]
-                    values.append(Wh[u])
+                    pairs.append((e.item(), u.item()))
+                    pair_owner.append(v)
+        if not pairs:
+            return F.relu(Wh)
 
-            # Staple zu Tensoren [L, out_dim]
-            key_tensor = torch.stack(keys, dim=0)
-            value_tensor = torch.stack(values, dim=0)
+        # 2) Key/Value Tensor erstellen
+        K_list = []
+        V_list = []
+        for e, u in pairs:
+            k = Wh[u] + (We[e] if We is not None else 0)
+            K_list.append(k)
+            V_list.append(Wh[u])
+        K_all = torch.stack(K_list, dim=0)  # [P, D]
+        V_all = torch.stack(V_list, dim=0)  # [P, D]
 
-            # Bereite Query/Key/Value für MultiheadAttention vor
-            # Query: das Feature des Zielknotens v
-            query = Wh[v].unsqueeze(0).unsqueeze(0)  # [1, 1, out_dim]
-            key = key_tensor.unsqueeze(0)  # [1, L, out_dim]
-            value = value_tensor.unsqueeze(0)  # [1, L, out_dim]
-
-            # 6) Multihead-Attention
-            attn_out, _ = self.multihead_attn(query, key, value)
-            # attn_out: [1,1,out_dim] → speichere in out[v]
-            out[v] = attn_out.view(-1)
-
-        # 7) Nichtlinearität & Rückgabe
+        # 3) Pro Zielknoten v batchen
+        P = len(pairs)
+        owners = torch.tensor(pair_owner, dtype=torch.long, device=x.device)  # [P]
+        # split K_all/V_all nach owners
+        grouped_K = []
+        grouped_V = []
+        masks = []
+        for v in range(N):
+            idx = (owners == v).nonzero(as_tuple=False).flatten()
+            if idx.numel() == 0:
+                # Leer-Sequence für v
+                grouped_K.append(torch.zeros((0, Wh.size(1)), device=x.device))
+                grouped_V.append(torch.zeros((0, Wh.size(1)), device=x.device))
+            else:
+                grouped_K.append(K_all[idx])
+                grouped_V.append(V_all[idx])
+        # Padding auf längste Sequence
+        K_padded = pad_sequence(grouped_K, batch_first=True)  # [N, L_max, D]
+        V_padded = pad_sequence(grouped_V, batch_first=True)  # [N, L_max, D]
+        # Maske: True an Paddings
+        mask = torch.arange(K_padded.size(1), device=x.device).unsqueeze(0) \
+             >= torch.tensor([g.size(0) for g in grouped_K], device=x.device).unsqueeze(1)
+        # 4) Attention im Batch
+        Q = Wh.unsqueeze(1)        # [N,1,D]
+        attn_out, _ = self.multihead_attn(
+            query=Q,
+            key=K_padded,
+            value=V_padded,
+            key_padding_mask=mask
+        )
+        out = attn_out.squeeze(1)  # [N,D]
         return F.relu(out)
 
 class DrugHyperConv(nn.Module):
