@@ -181,7 +181,11 @@ def create_shared_protein_hypergraph(proteins,
         # Contact prediction
         _, _, batch_tokens = batch_converter([(prot_id, sequence)])
         with torch.no_grad():
-            results = model(batch_tokens, repr_layers=[33], return_contacts=True)
+            try:
+                results = model(batch_tokens, repr_layers=[33], return_contacts=True)
+            except ValueError as e:
+                print(f"Skipping {prot_id} due to error: {e}")
+                continue
         contact_map = results["contacts"][0].cpu().numpy()
         # Local hypergraph
         local_edges, local_nodes, local_node_features = build_local_protein_hypergraph(

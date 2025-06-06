@@ -169,9 +169,25 @@ def create_shared_hypergraph_with_labels(smiles_list, plot=True, plot_individual
 
     # 2) Pro SMILES: lokalen Graphen holen und in globalen ablegen
     for smiles in tqdm(smiles_list, desc="Processing SMILES"):
-        local_hyperedges, local_node_labels, trade_name, local_node_features, local_nodes_labels = create_minimal_hypergraph_with_labels(
-            smiles, plot=plot_individual
-        )
+        try:
+            local_hyperedges, local_node_labels, trade_name, local_node_features, local_nodes_labels = create_minimal_hypergraph_with_labels(
+                smiles, plot=plot_individual
+            )
+            if not local_hyperedges or not local_node_labels:
+                print(f"No valid hyperedges or node labels found for SMILES: {smiles}")
+                continue
+            if not trade_name:
+                print(f"No trade name found for SMILES: {smiles}")
+                continue
+            if not local_node_features:
+                print(f"No node features found for SMILES: {smiles}")
+                continue
+            if not local_nodes_labels:
+                print(f"No node labels found for SMILES: {smiles}")
+                continue
+        except Exception as e:
+            print(f"Error processing SMILES '{smiles}': {e}")
+            continue
         trade_names.append(trade_name)
 
         # 2a) Lokale Knoten → globale Knoten mappen
