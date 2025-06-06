@@ -173,18 +173,8 @@ def create_shared_hypergraph_with_labels(smiles_list, plot=True, plot_individual
             local_hyperedges, local_node_labels, trade_name, local_node_features, local_nodes_labels = create_minimal_hypergraph_with_labels(
                 smiles, plot=plot_individual
             )
-            if not local_hyperedges or not local_node_labels:
-                print(f"No valid hyperedges or node labels found for SMILES: {smiles}")
-                continue
             if not trade_name:
                 print(f"No trade name found for SMILES: {smiles}")
-                continue
-            if local_node_features is None or (
-                    hasattr(local_node_features, "size") and local_node_features.size == 0):
-                print(f"No node features found for SMILES: {smiles}")
-                continue
-            if not local_nodes_labels:
-                print(f"No node labels found for SMILES: {smiles}")
                 continue
         except Exception as e:
             print(f"Error processing SMILES '{smiles}': {e}")
