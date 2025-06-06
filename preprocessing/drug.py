@@ -53,7 +53,7 @@ def draw_hypergraph(hyperedges, node_labels, name,
     plt.show()
 
 
-def create_minimal_hypergraph_with_labels(smiles, plot=True):
+def create_minimal_hypergraph_with_labels(smiles, plot=True, use_trade_name=False):
     """
     Minimaler Hypergraph mit Beschriftungen:
       - Gesamt-Drug-Hyperedge (Trade Name)
@@ -71,7 +71,9 @@ def create_minimal_hypergraph_with_labels(smiles, plot=True):
 
     # Trade-Name bestimmen
     canonical_smiles = Chem.MolToSmiles(mol)
-    trade_name = get_trade_name_from_smiles(canonical_smiles)
+    trade_name = smiles
+    if use_trade_name:
+        trade_name = get_trade_name_from_smiles(canonical_smiles)
 
     # Neuen Knoten-Index für das ganze Drug-Molekül
     drug_node = nums_atom
