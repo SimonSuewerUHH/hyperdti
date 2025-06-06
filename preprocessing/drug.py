@@ -179,7 +179,8 @@ def create_shared_hypergraph_with_labels(smiles_list, plot=True, plot_individual
             if not trade_name:
                 print(f"No trade name found for SMILES: {smiles}")
                 continue
-            if not local_node_features:
+            if local_node_features is None or (
+                    hasattr(local_node_features, "size") and local_node_features.size == 0):
                 print(f"No node features found for SMILES: {smiles}")
                 continue
             if not local_nodes_labels:
