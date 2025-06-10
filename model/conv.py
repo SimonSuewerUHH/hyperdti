@@ -1,3 +1,5 @@
+import time
+
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -33,10 +35,14 @@ class CustomHyperSemanticMessagePassing(nn.Module):
         edge_attr: [E, edge_dim]
         """
         N = x.size(0)
-        Wh = self.lin(x)                             # [N, D]
+        start = time.time()
+        Wh = self.lin(x)  # [N, D]
         We = self.edge_lin(edge_attr) if self.has_edge_attr else None  # [E, D]
+        print(
+            f"[CustomHyperSemanticMessagePassing] Linear layers took {time.time() - start:.4f} seconds")
 
         # 1) Alle (e,u)-Paare sammeln
+        start = time.time()
         pairs = []
         pair_owner = []  # für jedes Paar, zu welchem Zielknoten v es gehört
         for v in range(N):
@@ -49,8 +55,11 @@ class CustomHyperSemanticMessagePassing(nn.Module):
                     pair_owner.append(v)
         if not pairs:
             return F.relu(Wh)
+        print(
+            f"[CustomHyperSemanticMessagePassing] Collecting pairs took {time.time() - start:.4f} seconds")
 
         # 2) Key/Value Tensor erstellen
+        start = time.time()
         K_list = []
         V_list = []
         for e, u in pairs:
@@ -59,8 +68,11 @@ class CustomHyperSemanticMessagePassing(nn.Module):
             V_list.append(Wh[u])
         K_all = torch.stack(K_list, dim=0)  # [P, D]
         V_all = torch.stack(V_list, dim=0)  # [P, D]
+        print(
+            f"[CustomHyperSemanticMessagePassing] Creating key/value tensors took {time.time() - start:.4f} seconds")
 
         # 3) Pro Zielknoten v batchen
+        start = time.time()
         P = len(pairs)
         owners = torch.tensor(pair_owner, dtype=torch.long, device=x.device)  # [P]
         # split K_all/V_all nach owners
@@ -81,9 +93,13 @@ class CustomHyperSemanticMessagePassing(nn.Module):
         V_padded = pad_sequence(grouped_V, batch_first=True)  # [N, L_max, D]
         # Maske: True an Paddings
         mask = torch.arange(K_padded.size(1), device=x.device).unsqueeze(0) \
-             >= torch.tensor([g.size(0) for g in grouped_K], device=x.device).unsqueeze(1)
+               >= torch.tensor([g.size(0) for g in grouped_K], device=x.device).unsqueeze(1)
+        print(
+            f"[CustomHyperSemanticMessagePassing] Batching took {time.time() - start:.4f} seconds")
+
         # 4) Attention im Batch
-        Q = Wh.unsqueeze(1)        # [N,1,D]
+        start = time.time()
+        Q = Wh.unsqueeze(1)  # [N,1,D]
         attn_out, _ = self.multihead_attn(
             query=Q,
             key=K_padded,
@@ -91,6 +107,8 @@ class CustomHyperSemanticMessagePassing(nn.Module):
             key_padding_mask=mask
         )
         out = attn_out.squeeze(1)  # [N,D]
+        print(
+            f"[CustomHyperSemanticMessagePassing] Attention took {time.time() - start:.4f} seconds")
         return F.relu(out)
 
 class DrugHyperConv(nn.Module):
@@ -113,11 +131,27 @@ class DrugHyperConv(nn.Module):
 
     def forward(self, x: torch.Tensor, edge_x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
         # HypergraphConv expects: x (num_nodes, in_channels), incidence (num_hyperedges, num_nodes)
+        import time
+        start1 = time.time()
         h = self.conv1(x, edge_index, edge_x)
+        conv1_time = time.time() - start1
+        print(f"[DrugHyperConv] Conv1 took {conv1_time:.4f} seconds")
+
+        start2 = time.time()
         h = self.relu(h)
         h = self.dropout(h)
+        relu1_time = time.time() - start2
+        print(f"[DrugHyperConv]  Relu1 + dropout took {relu1_time:.4f} seconds")
+
+        start3 = time.time()
         h = self.conv2(h, edge_index, edge_x)
+        conv2_time = time.time() - start3
+        print(f"[DrugHyperConv]  Conv2 took {conv2_time:.4f} seconds")
+
+        start4 = time.time()
         h = self.relu(h)
+        relu2_time = time.time() - start4
+        print(f"[DrugHyperConv]  Relu2 took {relu2_time:.4f} seconds")
         return h
 
 
