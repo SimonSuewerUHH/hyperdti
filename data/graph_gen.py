@@ -47,6 +47,8 @@ class HypergraphDataGenerator:
                 drug_node_id = self.find_key_by_value(node_labels, drug)
                 protein_ids = [self.find_key_by_value(global_node_labels_p, x) for x in proteins]
                 for n in protein_ids:
+                    if n is None or drug_node_id is None:
+                        continue
                     protein_to_drug.append([drug_node_id, n])
 
             return torch.tensor(protein_to_drug).t().contiguous()

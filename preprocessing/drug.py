@@ -175,9 +175,6 @@ def create_shared_hypergraph_with_labels(smiles_list, plot=True, plot_individual
             local_hyperedges, local_node_labels, trade_name, local_node_features, local_nodes_labels = create_minimal_hypergraph_with_labels(
                 smiles, plot=plot_individual
             )
-            if not trade_name:
-                print(f"No trade name found for SMILES: {smiles}")
-                continue
         except Exception as e:
             print(f"Error processing SMILES '{smiles}': {e}")
             continue
