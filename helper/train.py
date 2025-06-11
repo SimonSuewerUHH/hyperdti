@@ -105,6 +105,7 @@ def train(data: HeteroData, cfg: Config):
         loss = train_epoch(model, data, optimizer, criterion)
         train_recall = get_recall(loss)
         #val_recall = evaluate(model, data, split='val')
+        print( f" | Train Recall: {train_recall:.4%}")
         tqdm.write(
             f"Epoch {epoch}/{cfg.epochs} | Loss: {loss:.4f}"
             f" | Train Recall: {train_recall:.4%}"
