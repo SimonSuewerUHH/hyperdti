@@ -11,7 +11,7 @@ def main():
     torch.manual_seed(cfg.seed)
 
     df = pd.read_csv('dataset/BindindDB/full_data.csv')
-    df_5 = df[0:1000]
+    df_5 = df[0:1100]
     smiles = df_5['SMILES']
     proteins = df_5['Proteins']
     sequences = df_5['sequence']
