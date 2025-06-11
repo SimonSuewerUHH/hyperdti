@@ -15,7 +15,7 @@ def train_epoch(
     data: HeteroData,
     optimizer,
     criterion,
-    batch_size: int = 800,
+    batch_size: int = 1000,
     neg_ratio: float = 0.1
 ) -> float:
     """
