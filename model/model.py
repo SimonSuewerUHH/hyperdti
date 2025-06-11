@@ -7,7 +7,7 @@ from torch_geometric.data import HeteroData
 from tqdm import tqdm
 
 from model.attention import DrugProteinAttention
-from model.conv import DrugHyperConv, ProteinHyperConv
+from model.conv import HypergraphConv, HypergraphAttantion
 from model.link import LinkPredictor
 
 
@@ -21,22 +21,17 @@ class HeteroHyperModel(nn.Module):
             drug_in: int,
             drug_edge: int,
             protein_in: int,
-            hidden: int = 64,
+            hidden: int = 10,
             heads: int = 4,
             dropout: float = 0.1,
             num_rounds: int = 3,  # ← how many mp rounds
     ):
         super().__init__()
         self.num_rounds = num_rounds
-        self.drug_hyper = DrugHyperConv(drug_in,
-                                        drug_edge,
-                                        hidden,
-                                        hidden,
-                                        dropout)
-        self.protein_hyper = ProteinHyperConv(protein_in,
-                                              hidden,
-                                              hidden,
-                                              dropout)
+        self.drug_hyper = HypergraphAttantion(drug_in,
+                                              hidden)
+        self.protein_hyper = HypergraphConv(protein_in,
+                                            hidden)
 
         self.drug_back_projection = nn.Linear(hidden, drug_in, bias=False)
 
@@ -76,7 +71,7 @@ class HeteroHyperModel(nn.Module):
         for i in tqdm(range(num_rounds), desc='Rounds'):
             start_time = time.time()
 
-            x_drug = self.drug_hyper(x_drug, edge_drug, inc_drug)
+            x_drug = self.drug_hyper(x_drug, inc_drug, edge_drug)
             tqdm.write(f"Drug hypergraph conv: {time.time() - start_time:.3f}s")
 
             drug_time = time.time()

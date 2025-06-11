@@ -178,6 +178,9 @@ def create_shared_hypergraph_with_labels(smiles_list, plot=True, plot_individual
         except Exception as e:
             print(f"Error processing SMILES '{smiles}': {e}")
             continue
+        if trade_name in trade_names:
+            print(f"Trade name '{trade_name}' already exists, skipping duplicate.")
+            continue
         trade_names.append(trade_name)
 
         # 2a) Lokale Knoten → globale Knoten mappen
@@ -230,10 +233,12 @@ def create_shared_hypergraph_with_labels(smiles_list, plot=True, plot_individual
                     break
 
             helper_global_hyperedges[new_edge_label] = new_edge_val
+            assert new_edge_label not in global_hyperedges
             global_hyperedges[new_edge_label] = new_global_hyperedges[new_edge_label]
             global_edge_features.append(
                 local_nodes_labels[new_helper_global_hyperedges_local_idx[new_edge_label]]
             )
+            assert len(global_edge_features) == len(global_hyperedges)
 
         # 3) Duplikate entfernen - nur unique Hyperedges behalten
         unique_nodesets = {}  # Dict[frozenset, edge_label]
@@ -250,9 +255,12 @@ def create_shared_hypergraph_with_labels(smiles_list, plot=True, plot_individual
         # Remove duplicates
         for edge_label in duplicate_edges:
             edge_labels = list(global_hyperedges.keys())
+
             del_index = edge_labels.index(edge_label)
+            temp_edge_features = global_hyperedges.copy()
             del global_hyperedges[edge_label]
             del global_edge_features[del_index]
+            assert len(global_edge_features) == len(global_hyperedges)
     # 4) Plotten
     if plot:
         draw_hypergraph(

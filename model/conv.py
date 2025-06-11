@@ -1,9 +1,208 @@
 import time
+from typing import Optional
 
 import torch
-from torch import nn
 import torch.nn.functional as F
+from torch import nn, Tensor
+from torch.nn import Parameter
 from torch.nn.utils.rnn import pad_sequence
+from torch_geometric.nn import MessagePassing
+from torch_geometric.nn.dense.linear import Linear
+from torch_geometric.nn.inits import glorot, zeros
+from torch_geometric.utils import scatter, softmax
+
+class HypergraphConv(MessagePassing):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        concat: bool = True,
+        bias: bool = True,
+        **kwargs,
+    ):
+        kwargs.setdefault('aggr', 'add')
+        super().__init__(flow='source_to_target', node_dim=0, **kwargs)
+
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.concat = True
+        self.lin = Linear(in_channels, out_channels, bias=False,
+                          weight_initializer='glorot')
+
+        if bias and concat:
+            self.bias = Parameter(torch.empty(out_channels))
+        elif bias and not concat:
+            self.bias = Parameter(torch.empty(out_channels))
+        else:
+            self.register_parameter('bias', None)
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        super().reset_parameters()
+        self.lin.reset_parameters()
+        zeros(self.bias)
+
+
+    def forward(self, x: Tensor, hyperedge_index: Tensor) -> Tensor:
+
+        num_nodes = x.size(0)
+        num_edges = int(hyperedge_index[1].max()) + 1
+
+        hyperedge_weight = x.new_ones(num_edges)
+
+        x = self.lin(x)
+
+        alpha = None
+        D = scatter(hyperedge_weight[hyperedge_index[1]], hyperedge_index[0],
+                    dim=0, dim_size=num_nodes, reduce='sum')
+        D = 1.0 / D
+        D[D == float("inf")] = 0
+
+        B = scatter(x.new_ones(hyperedge_index.size(1)), hyperedge_index[1],
+                    dim=0, dim_size=num_edges, reduce='sum')
+        B = 1.0 / B
+        B[B == float("inf")] = 0
+
+        out = self.propagate(hyperedge_index, x=x, norm=B, alpha=alpha,
+                             size=(num_nodes, num_edges))
+        out = self.propagate(hyperedge_index.flip([0]), x=out, norm=D,
+                             alpha=alpha, size=(num_edges, num_nodes))
+
+        if self.concat is True:
+            out = out.view(-1, self.out_channels)
+        else:
+            out = out.mean(dim=1)
+
+        if self.bias is not None:
+            out = out + self.bias
+
+        return out
+
+
+    def message(self, x_j: Tensor, norm_i: Tensor, alpha: Tensor) -> Tensor:
+        H, F = 1, self.out_channels
+
+        out = norm_i.view(-1, 1, 1) * x_j.view(-1, H, F)
+
+        if alpha is not None:
+            out = alpha.view(-1, 1, 1) * out
+
+        return out
+
+
+class HypergraphAttantion(MessagePassing):
+    def __init__(
+            self,
+            in_channels: int,
+            out_channels: int,
+            attention_mode: str = 'node',
+            heads: int = 1,
+            concat: bool = True,
+            negative_slope: float = 0.2,
+            dropout: float = 0,
+            bias: bool = True,
+            **kwargs,
+    ):
+        kwargs.setdefault('aggr', 'add')
+        super().__init__(flow='source_to_target', node_dim=0, **kwargs)
+
+        assert attention_mode in ['node', 'edge']
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.attention_mode = attention_mode
+
+        self.heads = heads
+        self.concat = concat
+        self.negative_slope = negative_slope
+        self.dropout = dropout
+        self.lin = Linear(in_channels, heads * out_channels, bias=False,
+                          weight_initializer='glorot')
+        self.lin_edge = Linear(10, heads * out_channels, bias=False,
+                          weight_initializer='glorot')
+        self.att = Parameter(torch.empty(1, heads, 2 * out_channels))
+
+        if bias and concat:
+            self.bias = Parameter(torch.empty(heads * out_channels))
+        elif bias and not concat:
+            self.bias = Parameter(torch.empty(out_channels))
+        else:
+            self.register_parameter('bias', None)
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        super().reset_parameters()
+        self.lin.reset_parameters()
+        glorot(self.att)
+        zeros(self.bias)
+
+    def forward(self,
+                x: Tensor,
+                hyperedge_index: Tensor,
+                hyperedge_attr: Optional[Tensor] = None) -> Tensor:
+
+        num_nodes = x.size(0)
+        num_edges = int(hyperedge_index[1].max()) + 1
+
+
+        hyperedge_weight = x.new_ones(num_edges)
+
+        x = self.lin(x)
+        x = x.view(-1, self.heads, self.out_channels)
+
+
+        hyperedge_attr = self.lin_edge(hyperedge_attr)
+        hyperedge_attr = hyperedge_attr.view(-1, self.heads,
+                                             self.out_channels)
+
+
+        x_i = x[hyperedge_index[0]]
+        x_j = hyperedge_attr[hyperedge_index[1]]
+        alpha = (torch.cat([x_i, x_j], dim=-1) * self.att).sum(dim=-1)
+        alpha = F.leaky_relu(alpha, self.negative_slope)
+        if self.attention_mode == 'node':
+            alpha = softmax(alpha, hyperedge_index[1], num_nodes=num_edges)
+        else:
+            alpha = softmax(alpha, hyperedge_index[0], num_nodes=num_nodes)
+        alpha = F.dropout(alpha, p=self.dropout, training=self.training)
+
+        D = scatter(hyperedge_weight[hyperedge_index[1]], hyperedge_index[0],
+                    dim=0, dim_size=num_nodes, reduce='sum')
+        D = 1.0 / D
+        D[D == float("inf")] = 0
+
+        B = scatter(x.new_ones(hyperedge_index.size(1)), hyperedge_index[1],
+                    dim=0, dim_size=num_edges, reduce='sum')
+        B = 1.0 / B
+        B[B == float("inf")] = 0
+
+        out = self.propagate(hyperedge_index, x=x, norm=B, alpha=alpha,
+                             size=(num_nodes, num_edges))
+        out = self.propagate(hyperedge_index.flip([0]), x=out, norm=D,
+                             alpha=alpha, size=(num_edges, num_nodes))
+
+        if self.concat is True:
+            out = out.view(-1, self.heads * self.out_channels)
+        else:
+            out = out.mean(dim=1)
+
+        if self.bias is not None:
+            out = out + self.bias
+
+        return out
+
+    def message(self, x_j: Tensor, norm_i: Tensor, alpha: Tensor) -> Tensor:
+        H, F = self.heads, self.out_channels
+
+        out = norm_i.view(-1, 1, 1) * x_j.view(-1, H, F)
+
+        if alpha is not None:
+            out = alpha.view(-1, self.heads, 1) * out
+
+        return out
 
 
 class CustomHyperSemanticMessagePassing(nn.Module):
@@ -111,10 +310,12 @@ class CustomHyperSemanticMessagePassing(nn.Module):
             f"[CustomHyperSemanticMessagePassing] Attention took {time.time() - start:.4f} seconds")
         return F.relu(out)
 
+
 class DrugHyperConv(nn.Module):
     """
     Module for hypergraph convolution on drug-atom to drug-hyperedge incidence.
     """
+
     def __init__(
             self,
             in_dim: int,
@@ -129,7 +330,8 @@ class DrugHyperConv(nn.Module):
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x: torch.Tensor, edge_x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, edge_x: torch.Tensor,
+                edge_index: torch.Tensor) -> torch.Tensor:
         # HypergraphConv expects: x (num_nodes, in_channels), incidence (num_hyperedges, num_nodes)
         import time
         start1 = time.time()

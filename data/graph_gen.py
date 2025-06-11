@@ -54,7 +54,7 @@ class HypergraphDataGenerator:
             return torch.tensor(protein_to_drug).t().contiguous()
 
     def get_hyper_edge_index(self, hyperedges, num_nodes,
-                                          sparse_incidence_matrix=True):
+                                          sparse_incidence_matrix=False):
         """
         Gibt den Hypergraphen als Incidence-Matrix zurück.
         """

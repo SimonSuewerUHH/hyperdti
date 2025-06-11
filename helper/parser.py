@@ -15,7 +15,7 @@ class Config:
     val_ratio: float = 0.1
     test_ratio: float = 0.1
     seed: int = 42
-    hidden_dim: int = 64
+    hidden_dim: int = 12
     heads: int = 4
     dropout: float = 0.1
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
