@@ -68,28 +68,28 @@ class HeteroHyperModel(nn.Module):
 
         # multi‐round message passing
         num_rounds = num_rounds if num_rounds is not None else self.num_rounds
-        for i in tqdm(range(num_rounds), desc='Rounds'):
-            start_time = time.time()
+        #for i in tqdm(range(num_rounds), desc='Rounds'):
+        start_time = time.time()
 
-            x_drug = self.drug_hyper(x_drug, inc_drug, edge_drug)
-            #tqdm.write(f"Drug hypergraph conv: {time.time() - start_time:.3f}s")
+        x_drug = self.drug_hyper(x_drug, inc_drug, edge_drug)
+        #tqdm.write(f"Drug hypergraph conv: {time.time() - start_time:.3f}s")
 
-            drug_time = time.time()
-            x_prot = self.protein_hyper(x_prot, prot_inc)
-            #tqdm.write(f"Protein hypergraph conv: {time.time() - drug_time:.3f}s")
+        drug_time = time.time()
+        x_prot = self.protein_hyper(x_prot, prot_inc)
+        #tqdm.write(f"Protein hypergraph conv: {time.time() - drug_time:.3f}s")
 
-            # cross‐type attention updates protein (and optionally drugs)
-            # returns updated (drug, protein)
-            att_time = time.time()
-            x_drug, x_prot = self.drug_protein_att(x_drug, x_prot, edge_index_all)
-            #tqdm.write(f"Cross attention: {time.time() - att_time:.3f}s")
+        # cross‐type attention updates protein (and optionally drugs)
+        # returns updated (drug, protein)
+        att_time = time.time()
+        x_drug, x_prot = self.drug_protein_att(x_drug, x_prot, edge_index_all)
+        #tqdm.write(f"Cross attention: {time.time() - att_time:.3f}s")
 
-            proj_time = time.time()
-            x_drug = self.drug_back_projection(x_drug)
-            x_prot = self.protein_back_projection(x_prot)
-            #tqdm.write(f"Back projection: {time.time() - proj_time:.3f}s")
+        proj_time = time.time()
+        x_drug = self.drug_back_projection(x_drug)
+        x_prot = self.protein_back_projection(x_prot)
+        #tqdm.write(f"Back projection: {time.time() - proj_time:.3f}s")
 
-            #tqdm.write(f"Total round time: {time.time() - start_time:.3f}s")
+        #tqdm.write(f"Total round time: {time.time() - start_time:.3f}s")
 
         # final link‐prediction on drug→protein edges
         pred_time = time.time()
