@@ -15,7 +15,7 @@ def train_epoch(model,
                 data: HeteroData,
                 optimizer,
                 criterion,
-                neg_ratio: float = 0.9) -> float:
+                neg_ratio: float = 1) -> float:
     model.train()
     optimizer.zero_grad()
 
