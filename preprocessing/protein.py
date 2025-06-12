@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import torch
 import esm
@@ -20,6 +22,19 @@ def get_model():
     model, alphabet = esm.pretrained.esm1b_t33_650M_UR50S()
     return model, alphabet
 
+
+def check_cache(prot_id: str):
+    cache_path = f"cache/{prot_id}_contacts.npy"
+    if os.path.exists(cache_path):
+        print(f"Loading contact map from cache: {prot_id}")
+        return np.load(cache_path)
+    return None
+
+def save_cache(prot_id: str, contact_map):
+    cache_path = f"cache/{prot_id}_contacts.npy"
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    np.save(cache_path, contact_map)
+    print(f"Saved contact map to cache: {prot_id}")
 
 def get_protbert_embedding(seq):
     sequence = " ".join(list(re.sub(r"[UZOB]", "X", seq)))
@@ -150,7 +165,8 @@ def create_shared_protein_hypergraph(proteins,
                                      model,
                                      alphabet,
                                      threshold: float = 0.5,
-                                     plot: bool = True):
+                                     plot: bool = True,
+                                     use_cache: bool = True):
     """
     Merges multiple protein hypergraphs into a shared global hypergraph.
 
@@ -179,14 +195,21 @@ def create_shared_protein_hypergraph(proteins,
             continue
         sawn_proteins.add(prot_id)
         # Contact prediction
-        _, _, batch_tokens = batch_converter([(prot_id, sequence)])
-        with torch.no_grad():
-            try:
-                results = model(batch_tokens, repr_layers=[33], return_contacts=True)
-            except ValueError as e:
-                print(f"Skipping {prot_id} due to error: {e}")
-                continue
-        contact_map = results["contacts"][0].cpu().numpy()
+
+        contact_map = None
+        if use_cache:
+            contact_map = check_cache(prot_id) #with no cache always None
+        if contact_map is None:
+            _, _, batch_tokens = batch_converter([(prot_id, sequence)])
+            with torch.no_grad():
+                try:
+                    results = model(batch_tokens, repr_layers=[33], return_contacts=True)
+                except ValueError as e:
+                    print(f"Skipping {prot_id} due to error: {e}")
+                    continue
+            contact_map = results["contacts"][0].cpu().numpy()
+            if use_cache:
+                save_cache(prot_id, contact_map)
         # Local hypergraph
         local_edges, local_nodes, local_node_features = build_local_protein_hypergraph(
             contact_map, sequence, threshold, trade_name=prot_id
