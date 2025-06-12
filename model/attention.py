@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 class DrugProteinAttention(nn.Module):
     """
-    Module for multi-head attention message passing from Drug to Protein nodes.
+    Vektorisierte, bidirektionale Multi-Head-Attention zwischen Drug- und Protein-Knoten.
     """
     def __init__(
         self,
@@ -12,75 +12,69 @@ class DrugProteinAttention(nn.Module):
         in_protein: int,
         out_dim: int,
         num_heads: int = 4,
+        dropout: float = 0.1,
     ):
         super().__init__()
-        # Projektionen in denselben Embed­dingspace
+        # lineare Projektionen
         self.src_lin = nn.Linear(in_drug, out_dim, bias=False)
         self.dst_lin = nn.Linear(in_protein, out_dim, bias=False)
-        # Zwei Attention-Module: Src→Dst und Dst→Src
-        self.attn_src2dst = nn.MultiheadAttention(embed_dim=out_dim,
-                                                  num_heads=num_heads,
-                                                  batch_first=True)
-        self.attn_dst2src = nn.MultiheadAttention(embed_dim=out_dim,
-                                                  num_heads=num_heads,
-                                                  batch_first=True)
+        # batched MultiheadAttention (batch_first=True)
+        self.attn_src2dst = nn.MultiheadAttention(
+            embed_dim=out_dim, num_heads=num_heads, batch_first=True, dropout=dropout
+        )
+        self.attn_dst2src = nn.MultiheadAttention(
+            embed_dim=out_dim, num_heads=num_heads, batch_first=True, dropout=dropout
+        )
+        # Norm & Dropout für Residual-Pfade
+        self.norm_src = nn.LayerNorm(out_dim)
+        self.norm_dst = nn.LayerNorm(out_dim)
+        self.drop = nn.Dropout(dropout)
 
-    def forward(self,
-                x_src: torch.Tensor,
-                x_dst: torch.Tensor,
-                edge_index: torch.LongTensor
-                ) -> (torch.Tensor, torch.Tensor):
-        """
-        Args:
-            x_src (Tensor[N_src, in_dim_src]): Embeddings der Quellknoten (Drugs)
-            x_dst (Tensor[N_dst, in_dim_dst]): Embeddings der Zielknoten (Proteine)
-            edge_index (LongTensor[E, 2]):     Jede Zeile [src_id, dst_id]
-        Returns:
-            updated_src (Tensor[N_src, out_dim]),
-            updated_dst (Tensor[N_dst, out_dim])
-        """
-        N_src, N_dst = x_src.size(0), x_dst.size(0)
+    def forward(
+        self,
+        x_src: torch.Tensor,            # [N_src, in_drug]
+        x_dst: torch.Tensor,            # [N_dst, in_protein]
+        edge_index: torch.LongTensor    # [2, E]
+    ) -> (torch.Tensor, torch.Tensor):
+        h_src = self.src_lin(x_src)      # [N_src, out_dim]
+        h_dst = self.dst_lin(x_dst)      # [N_dst, out_dim]
+        N_src, N_dst = h_src.size(0), h_dst.size(0)
 
-        # 1) Projektion
-        h_src = self.src_lin(x_src)  # [N_src, out_dim]
-        h_dst = self.dst_lin(x_dst)  # [N_dst, out_dim]
+        # ---- Drug → Protein ----
+        # Queries für alle Proteine in einem Batch
+        Q_dst = h_dst.unsqueeze(1)       # [N_dst, 1, out_dim]
+        # Keys & Values: repeat h_src für jedes Protein
+        K_src = h_src.unsqueeze(0).expand(N_dst, -1, -1)  # [N_dst, N_src, out_dim]
+        V_src = K_src.clone()
+        # Maske: True an Positionen, die NICHT attendiert werden sollen
+        mask_src2dst = torch.ones((N_dst, N_src), dtype=torch.bool, device=h_src.device)
+        src_idx, dst_idx = edge_index  # beide Länge E
+        mask_src2dst[dst_idx, src_idx] = False
 
-        # 2) Adjazenz-Listen aufbauen
-        node_to_src = [[] for _ in range(N_dst)]
-        node_to_dst = [[] for _ in range(N_src)]
-        for s, d in edge_index.T.tolist():
-            node_to_src[d].append(s)
-            node_to_dst[s].append(d)
+        attn_dst, _ = self.attn_src2dst(
+            Q_dst, K_src, V_src,
+            key_padding_mask=mask_src2dst
+        )  # [N_dst, 1, out_dim]
+        updated_dst = attn_dst.squeeze(1)  # [N_dst, out_dim]
 
-        # 3) Attention: Src → Dst
-        updated_dst = torch.zeros_like(h_dst)
-        for v in range(N_dst):
-            src_ids = node_to_src[v]
-            if not src_ids:
-                updated_dst[v] = h_dst[v]
-                continue
-            # Keys & Values aus Drugs
-            K = h_src[src_ids]  # [L, out_dim]
-            V = h_src[src_ids]  # [L, out_dim]
-            # Query aus Protein
-            Q = h_dst[v].unsqueeze(0).unsqueeze(0)  # [1,1,out_dim]
-            attn_out, _ = self.attn_src2dst(Q, K.unsqueeze(0), V.unsqueeze(0))
-            updated_dst[v] = attn_out.view(-1)
+        # Residual + Norm + Aktivation
+        updated_dst = self.norm_dst(h_dst + self.drop(updated_dst))
+        updated_dst = F.relu(updated_dst)
 
-        # 4) Attention: Dst → Src
-        updated_src = torch.zeros_like(h_src)
-        for u in range(N_src):
-            dst_ids = node_to_dst[u]
-            if not dst_ids:
-                updated_src[u] = h_src[u]
-                continue
-            # Keys & Values aus Proteinen
-            K = h_dst[dst_ids]  # [L, out_dim]
-            V = h_dst[dst_ids]  # [L, out_dim]
-            # Query aus Drug
-            Q = h_src[u].unsqueeze(0).unsqueeze(0)  # [1,1,out_dim]
-            attn_out, _ = self.attn_dst2src(Q, K.unsqueeze(0), V.unsqueeze(0))
-            updated_src[u] = attn_out.view(-1)
+        # ---- Protein → Drug ----
+        Q_src = h_src.unsqueeze(1)       # [N_src, 1, out_dim]
+        K_dst = h_dst.unsqueeze(0).expand(N_src, -1, -1)  # [N_src, N_dst, out_dim]
+        V_dst = K_dst.clone()
+        mask_dst2src = torch.ones((N_src, N_dst), dtype=torch.bool, device=h_src.device)
+        mask_dst2src[src_idx, dst_idx] = False
 
-        # 5) Nichtlinearität
-        return F.relu(updated_src), F.relu(updated_dst)
+        attn_src, _ = self.attn_dst2src(
+            Q_src, K_dst, V_dst,
+            key_padding_mask=mask_dst2src
+        )  # [N_src, 1, out_dim]
+        updated_src = attn_src.squeeze(1)  # [N_src, out_dim]
+
+        updated_src = self.norm_src(h_src + self.drop(updated_src))
+        updated_src = F.relu(updated_src)
+
+        return updated_src, updated_dst
