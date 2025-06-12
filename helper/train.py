@@ -1,8 +1,6 @@
 import torch
-from sklearn.metrics import roc_auc_score
-from torch import nn, GradScaler, autocast
-from torch.nn.utils import clip_grad_norm_
-from torch.optim.lr_scheduler import StepLR, CosineAnnealingLR
+from torch import nn
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch_geometric.data import HeteroData
 from tqdm import tqdm
 from transformers import AdamW
@@ -17,7 +15,7 @@ def train_epoch(model,
                 data: HeteroData,
                 optimizer,
                 criterion,
-                neg_ratio: float = 0.1) -> float:
+                neg_ratio: float = 0.5) -> float:
     model.train()
     optimizer.zero_grad()
 
