@@ -147,6 +147,7 @@ def build_local_protein_hypergraph(contact_map: np.ndarray,
     pruned_edges, pruned_labels, pruned_values = prune_hypergraph(
         hyperedges, node_labels, node_values
     )
+
     if plot:
         H = hnx.Hypergraph(pruned_edges)
         plt.figure(figsize=(40, 24))  # Increased figure size for better readability
