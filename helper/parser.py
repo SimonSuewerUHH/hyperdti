@@ -8,7 +8,7 @@ import torch
 class Config:
     lr: float = 0.005
     weight_decay: float = 1e-5
-    epochs: int = 100
+    epochs: int = 250
     step_size: int = 40
     gamma: float = 0.5
     train_ratio: float = 0.8

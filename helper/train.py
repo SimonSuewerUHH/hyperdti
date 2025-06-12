@@ -1,10 +1,13 @@
 import torch
-from torch.optim import Adam
-from torch.optim.lr_scheduler import StepLR
+from sklearn.metrics import roc_auc_score
+from torch import nn, GradScaler, autocast
+from torch.nn.utils import clip_grad_norm_
+from torch.optim.lr_scheduler import StepLR, CosineAnnealingLR
 from torch_geometric.data import HeteroData
 from tqdm import tqdm
+from transformers import AdamW
 
-from helper.evaluate import split_edge_train_val_test, test_model, get_recall
+from helper.evaluate import split_edge_train_val_test, test_model
 from helper.negative_sampling import hetero_negative_sampling
 from helper.parser import Config
 from model.model import HeteroHyperModel
@@ -62,22 +65,36 @@ def train(data: HeteroData, cfg: Config):
         dropout=cfg.dropout,
     ).to(cfg.device)
 
-    optimizer = Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
-    scheduler = StepLR(optimizer, step_size=cfg.step_size, gamma=cfg.gamma)
-    criterion = torch.nn.BCEWithLogitsLoss()
+    # 1) Optimizer: AdamW (decoupled weight decay, oft stabiler als klassisches Adam+weight_decay)
+    optimizer = AdamW(
+        model.parameters(),
+        lr=1e-3,  # Start-Learning-Rate
+        weight_decay=1e-5  # Leichte Regularisierung
+    )
+
+    # 2) Scheduler: Cosine Annealing (glatte Absenkung der LR über Epochen)
+    scheduler = CosineAnnealingLR(
+        optimizer,
+        T_max=cfg.epochs,  # auf wie viele Epochen sich ein Zyklus erstreckt
+        eta_min=1e-6  # minimale LR am Ende
+    )
+
+    # 3) Loss: BCEWithLogits + pos_weight (gegen Class Imbalance)
+    #    Falls du deutlich mehr Negative hast, setze pos_weight = (#neg / #pos)
+    criterion = nn.BCEWithLogitsLoss()
 
     # Training loop
     for epoch in tqdm(range(1, cfg.epochs + 1), desc='Epochs'):
         loss = train_epoch(model, data, optimizer, criterion)
-        #train_recall = get_recall(loss)
+        # train_recall = get_recall(loss)
         # val_recall = evaluate(model, data, split='val')
         print(f"Train Loss: {loss:.4%}")
         # print(f" | Val Recall: {val_recall:.4%}")
-        #tqdm.write(
+        # tqdm.write(
         #    f"Epoch {epoch}/{cfg.epochs} | Loss: {loss:.4f}"
         #    f" | Train Recall: {train_recall:.4%}"
-            # f" | Val Recall: {val_recall:.4%}"
-        #)
+        # f" | Val Recall: {val_recall:.4%}"
+        # )
         scheduler.step()
 
     # Final test
