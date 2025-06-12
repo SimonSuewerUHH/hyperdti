@@ -37,9 +37,8 @@ class HeteroHyperModel(nn.Module):
 
         # cross‐type attention (shared across rounds)
         self.drug_protein_att = DrugProteinAttention(
-            in_drug=hidden,
-            in_protein=hidden,
-            out_dim=hidden,
+            in_channels=hidden,
+            out_channels=hidden,
         )
 
         self.protein_hyper = HypergraphConv(protein_in,
