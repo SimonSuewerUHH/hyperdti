@@ -1,10 +1,11 @@
 import torch
+from sklearn.metrics import roc_auc_score
 from torch import nn
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch_geometric.data import HeteroData
 from tqdm import tqdm
 
-from helper.evaluate import split_edge_train_val_test, test_model
+from helper.evaluate import split_edge_train_val_test, test_model, evaluate, get_recall
 from helper.negative_sampling import hetero_negative_sampling
 from helper.parser import Config
 from model.model import HeteroHyperModel
@@ -82,10 +83,9 @@ def train(data: HeteroData, cfg: Config):
     # Training loop
     for epoch in tqdm(range(1, cfg.epochs + 1), desc='Epochs'):
         loss = train_epoch(model, data, optimizer, criterion)
-        # train_recall = get_recall(loss)
-        # val_recall = evaluate(model, data, split='val')
-        print(f"Train Loss: {loss:.4%}")
-        # print(f" | Val Recall: {val_recall:.4%}")
+        train_recall = get_recall(loss)
+        val_recall = evaluate(model, data)
+        print(f"Train Loss: {loss:.4%} | Train Recall: {train_recall:.4%} | Val Recall: {val_recall:.4%}")
         # tqdm.write(
         #    f"Epoch {epoch}/{cfg.epochs} | Loss: {loss:.4f}"
         #    f" | Train Recall: {train_recall:.4%}"

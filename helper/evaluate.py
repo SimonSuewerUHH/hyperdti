@@ -1,5 +1,8 @@
 import torch
 from torch_geometric.data import HeteroData
+import torch.nn.functional as F
+from sklearn.metrics import accuracy_score, roc_auc_score, precision_score, recall_score, precision_recall_curve, auc, f1_score
+import numpy as np
 
 
 def split_edge_train_val_test(
@@ -24,10 +27,9 @@ def split_edge_train_val_test(
     n_train = int(train_ratio * num_edges)
     n_val = int(val_ratio * num_edges)
 
-    train = edges[:n_train]
-    val = edges[n_train:n_train + n_val]
-    test = edges[n_train + n_val:]
-
+    train = edges[:, :n_train]
+    val = edges[:, n_train:n_train + n_val]
+    test = edges[:, n_train + n_val:]
     # store splits
     data[edge_type].val_pos_edge_index = val
     data[edge_type].test_pos_edge_index = test
@@ -50,6 +52,7 @@ def evaluate(
     model.eval()
     if device is None:
         device = next(model.parameters()).device
+    
 
     edge_type = ('drug', 'to', 'protein')
     # select positive edges
@@ -62,9 +65,13 @@ def evaluate(
     else:
         raise ValueError(f"Unknown split: {split}")
 
+    num_pos = pos_edge_index.size(1)
+    y = torch.ones(num_pos, device=device)
+
     # compute logits for positives only
     with torch.no_grad():
         logits = model(data, pos_edge_index=pos_edge_index)
+
     return get_recall(logits)
 
 
