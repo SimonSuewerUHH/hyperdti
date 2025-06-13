@@ -22,7 +22,7 @@ def main():
         proteins=proteins,
         sequences=sequences
     )
-    saved_path = 'dataset/BindindDB/test1.pkl'
+    saved_path = 'dataset/BindindDB/test2.pkl'
     if generator.data_exists(saved_path):
         print(f"Loading data from {saved_path}")
         data = generator.load_data(saved_path)
