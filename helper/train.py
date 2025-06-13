@@ -3,7 +3,6 @@ from torch import nn
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch_geometric.data import HeteroData
 from tqdm import tqdm
-from transformers import AdamW
 
 from helper.evaluate import split_edge_train_val_test, test_model
 from helper.negative_sampling import hetero_negative_sampling
@@ -64,7 +63,7 @@ def train(data: HeteroData, cfg: Config):
     ).to(cfg.device)
 
     # 1) Optimizer: AdamW (decoupled weight decay, oft stabiler als klassisches Adam+weight_decay)
-    optimizer = AdamW(
+    optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=1e-3,  # Start-Learning-Rate
         weight_decay=1e-5  # Leichte Regularisierung
@@ -80,7 +79,6 @@ def train(data: HeteroData, cfg: Config):
     # 3) Loss: BCEWithLogits + pos_weight (gegen Class Imbalance)
     #    Falls du deutlich mehr Negative hast, setze pos_weight = (#neg / #pos)
     criterion = nn.BCEWithLogitsLoss()
-
     # Training loop
     for epoch in tqdm(range(1, cfg.epochs + 1), desc='Epochs'):
         loss = train_epoch(model, data, optimizer, criterion)

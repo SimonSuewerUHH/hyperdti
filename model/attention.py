@@ -1,15 +1,13 @@
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple
 
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 from torch.nn import Parameter
 from torch_geometric.nn.conv import MessagePassing
-from torch_geometric.nn.dense.linear import Linear
 from torch_geometric.nn.inits import glorot, zeros
 from torch_geometric.typing import (
     Adj,
-    OptTensor,
 )
 from torch_geometric.utils import softmax
 
@@ -19,16 +17,17 @@ class DrugProteinAttention(MessagePassing):
     Bipartiter GAT-Conv, das Drugs → Proteine und Proteine → Drugs
     in zwei Attention‐Schritten durchführt, mit Residual, LayerNorm und Dropout.
     """
+
     def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        heads: int = 1,
-        concat: bool = True,
-        negative_slope: float = 0.2,
-        dropout: float = 0.1,
-        bias: bool = True,
-        **kwargs,
+            self,
+            in_channels: int,
+            out_channels: int,
+            heads: int = 1,
+            concat: bool = True,
+            negative_slope: float = 0.2,
+            dropout: float = 0.1,
+            bias: bool = True,
+            **kwargs,
     ):
         super().__init__(node_dim=0, aggr='add', **kwargs)
 
@@ -63,15 +62,15 @@ class DrugProteinAttention(MessagePassing):
         zeros(self.bias)
 
     def forward(
-        self,
-        x_src: Tensor,
-        x_dst: Tensor,
-        edge_index: Adj,
+            self,
+            x_src: Tensor,
+            x_dst: Tensor,
+            edge_index: Adj,
     ) -> Tuple[Tensor, Tensor]:
         # 1) Lineare Projektion und Aufteilen in Heads
         H, C = self.heads, self.out_channels
-        h_src = x_src.view(-1, H, C)   # [N_src, H, C]
-        h_dst = x_dst.view(-1, H, C)   # [N_dst, H, C]
+        h_src = x_src.view(-1, H, C)  # [N_src, H, C]
+        h_dst = x_dst.view(-1, H, C)  # [N_dst, H, C]
 
         # 2) Attention-Coefficients vorbereiten
         alpha_src = (h_src * self.att_src).sum(dim=-1)  # [N_src, H]
@@ -125,12 +124,12 @@ class DrugProteinAttention(MessagePassing):
         return src, dst
 
     def edge_update(
-        self,
-        alpha_j: Tensor,
-        alpha_i: Optional[Tensor],
-        edge_attr: Optional[Tensor],
-        index: Tensor,
-        ptr: Optional[Tensor],
+            self,
+            alpha_j: Tensor,
+            alpha_i: Optional[Tensor],
+            edge_attr: Optional[Tensor],
+            index: Tensor,
+            ptr: Optional[Tensor],
     ) -> Tensor:
         # Summiere Src- und Dst-Anteile
         alpha = alpha_j if alpha_i is None else alpha_j + alpha_i

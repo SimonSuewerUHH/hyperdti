@@ -1,22 +1,30 @@
 import os
+import re
 
-import numpy as np
-import torch
 import esm
 import hypernetx as hnx
 import matplotlib.pyplot as plt
-import re
-
+import numpy as np
+import torch
 from tqdm import tqdm
-from transformers import BertForMaskedLM, BertTokenizer, pipeline
+from transformers import BertForMaskedLM, BertTokenizer
 
 from preprocessing.helper import prune_isolated_nodes
 
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-tokenizer = BertTokenizer.from_pretrained('Rostlab/prot_bert_bfd',
-                                          do_lower_case=False)
-model = BertForMaskedLM.from_pretrained("Rostlab/prot_bert_bfd",
-                                        ignore_mismatched_sizes=True).to(device)
+device = None
+tokenizer = None
+model = None
+
+
+def init_tokenizer_model():
+    global device, tokenizer, model
+    if device is None:
+        device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+        tokenizer = BertTokenizer.from_pretrained('Rostlab/prot_bert_bfd',
+                                                  do_lower_case=False)
+        model = BertForMaskedLM.from_pretrained("Rostlab/prot_bert_bfd",
+                                                ignore_mismatched_sizes=True).to(device)
+
 
 def get_model():
     model, alphabet = esm.pretrained.esm1b_t33_650M_UR50S()
@@ -30,13 +38,16 @@ def check_cache(prot_id: str):
         return np.load(cache_path)
     return None
 
+
 def save_cache(prot_id: str, contact_map):
     cache_path = f"cache/{prot_id}_contacts.npy"
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
     np.save(cache_path, contact_map)
     print(f"Saved contact map to cache: {prot_id}")
 
+
 def get_protbert_embedding(seq):
+    init_tokenizer_model()
     sequence = " ".join(list(re.sub(r"[UZOB]", "X", seq)))
 
     ids = tokenizer(sequence, return_tensors='pt')
@@ -199,7 +210,7 @@ def create_shared_protein_hypergraph(proteins,
 
         contact_map = None
         if use_cache:
-            contact_map = check_cache(prot_id) #with no cache always None
+            contact_map = check_cache(prot_id)  # with no cache always None
         if contact_map is None:
             _, _, batch_tokens = batch_converter([(prot_id, sequence)])
             with torch.no_grad():

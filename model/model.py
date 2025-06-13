@@ -46,8 +46,8 @@ class HeteroHyperModel(nn.Module):
 
         self.link_pred = LinkPredictor(
             in_drug=drug_in,
-            in_protein=protein_in,
-            hidden_dim=hidden)
+            in_prot=protein_in,
+            hidden=hidden)
 
     def forward(self, data: HeteroData,
                 pos_edge_index: Tensor,

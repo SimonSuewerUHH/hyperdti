@@ -28,7 +28,7 @@ class HypergraphDataGenerator:
         self.proteins = proteins
         self.sequences = sequences
         self.proteins_sequences = list(zip(proteins, sequences))
-        self.protein_model, self.protein_alphabet = get_model()
+        self.protein_model, self.protein_alphabet = None, None
 
     def find_key_by_value(self, combined_node_labels, value):
         for n_id, node_value in combined_node_labels.items():  # for name, age in dictionary.iteritems():  (for Python 2.x)
@@ -74,6 +74,8 @@ class HypergraphDataGenerator:
             return torch.tensor(atom_to_he).t().contiguous()
 
     def generate(self) -> HeteroData:
+        if self.protein_model is None or self.protein_alphabet is None:
+            self.protein_model, self.protein_alphabet = get_model()
         data = HeteroData()
 
         (node_labels,
