@@ -222,10 +222,14 @@ def create_shared_protein_hypergraph(proteins,
             contact_map = results["contacts"][0].cpu().numpy()
             if use_cache:
                 save_cache(prot_id, contact_map)
-        # Local hypergraph
-        local_edges, local_nodes, local_node_features = build_local_protein_hypergraph(
-            contact_map, sequence, threshold, trade_name=prot_id
-        )
+        try:
+            # Local hypergraph
+            local_edges, local_nodes, local_node_features = build_local_protein_hypergraph(
+                contact_map, sequence, threshold, trade_name=prot_id
+            )
+        except KeyError as e:
+            print(f"Skipping {prot_id} due to error: {e}")
+            continue
         # Map to global indices
         local_to_global = {}
         for local_idx, aa in local_nodes.items():
