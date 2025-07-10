@@ -30,22 +30,6 @@ def get_model():
     model, alphabet = esm.pretrained.esm1b_t33_650M_UR50S()
     return model, alphabet
 
-
-def check_cache(prot_id: str):
-    cache_path = f"cache/{prot_id}_contacts.npy"
-    if os.path.exists(cache_path):
-        print(f"Loading contact map from cache: {prot_id}")
-        return np.load(cache_path)
-    return None
-
-
-def save_cache(prot_id: str, contact_map):
-    cache_path = f"cache/{prot_id}_contacts.npy"
-    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-    np.save(cache_path, contact_map)
-    print(f"Saved contact map to cache: {prot_id}")
-
-
 def get_protbert_embedding(seq):
     init_tokenizer_model()
     sequence = " ".join(list(re.sub(r"[UZOB]", "X", seq)))
@@ -195,11 +179,21 @@ def create_shared_protein_hypergraph(proteins,
     """
     batch_converter = alphabet.get_batch_converter()
     global_hyperedges = {}
-    helper_labels = {}  # for duplication detection (node symbols)
+    helper_labels = {}  # for duplication detection (node symbols)  
     global_node_labels = {}
     offset = 0
     sawn_proteins = set()
     global_node_features = []
+
+    cache_file = "cache/protein_cache.npz"
+    if use_cache and os.path.exists(cache_file):
+        cache = np.load(cache_file, allow_pickle=True)
+        global_hyperedges = cache['global_hyperedges'].item()
+        helper_labels = cache['helper_labels'].item()
+        global_node_labels = cache['global_node_labels'].item()
+        global_node_features = cache['global_node_features'].tolist()
+        offset = cache['offset']
+        sawn_proteins = set(cache['sawn_proteins'])
 
     # 1) Iterate proteins
     for prot_id, sequence in tqdm(proteins, desc="Processing proteins"):
@@ -209,8 +203,6 @@ def create_shared_protein_hypergraph(proteins,
         # Contact prediction
 
         contact_map = None
-        if use_cache:
-            contact_map = check_cache(prot_id)  # with no cache always None
         if contact_map is None:
             _, _, batch_tokens = batch_converter([(prot_id, sequence)])
             with torch.no_grad():
@@ -220,8 +212,6 @@ def create_shared_protein_hypergraph(proteins,
                     print(f"Skipping {prot_id} due to error: {e}")
                     continue
             contact_map = results["contacts"][0].cpu().numpy()
-            if use_cache:
-                save_cache(prot_id, contact_map)
         try:
             # Local hypergraph
             local_edges, local_nodes, local_node_features = build_local_protein_hypergraph(
@@ -255,6 +245,16 @@ def create_shared_protein_hypergraph(proteins,
             if not duplicate:
                 global_hyperedges[f"{edge_label}"] = global_nodes
                 helper_labels[f"{edge_label}"] = node_features
+
+        # Save cache periodically
+        if use_cache:
+            np.savez(cache_file,
+                     global_hyperedges=global_hyperedges,
+                     helper_labels=helper_labels,
+                     global_node_labels=global_node_labels,
+                     global_node_features=global_node_features,
+                     offset=offset,
+                     sawn_proteins=list(sawn_proteins))
     # 2) Optional plot
     if plot:
         H = hnx.Hypergraph(global_hyperedges)
