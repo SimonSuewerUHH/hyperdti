@@ -1,1 +1,33 @@
 *.pkl
+cache/
+cache/protein_cache.npz
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+env/
+bin/
+build/
+develop-eggs/
+dist/
+eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+.vscode/
+*.egg-info/
+.installed.cfg
+*.egg
+.idea
+*.sublime-project
+*.sublime-workspace
+.venv/
+venv/
